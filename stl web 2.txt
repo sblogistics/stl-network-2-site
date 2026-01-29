@@ -1,0 +1,938 @@
+# Python example using Selenium for USS portal
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverConnect
+from selenium.webdriver.support import expected_conditions as EC
+import time
+import json
+
+class USSAuctionScraper:
+    def __init__(self, username, password):
+        self.username = username
+        self.password = password
+        self.driver = webdriver.Chrome()  # or Firefox
+        
+    def login(self):
+        """Login to USS member portal"""
+        self.driver.get("https://uss-member-portal-url.jp/login")
+        
+        # Enter credentials
+        username_field = self.driver.find_element(By.ID, "username")
+        password_field = self.driver.find_element(By.ID, "password")
+        
+        username_field.send_keys(self.username)
+        password_field.send_keys(self.password)
+        
+        # Submit login
+        login_button = self.driver.find_element(By.ID, "login-button")
+        login_button.click()
+        
+        time.sleep(3)  # Wait for login
+        
+    def search_vehicles(self, make=None, model=None, year_from=None):
+        """Search for vehicles"""
+        # Navigate to search page
+        self.driver.get("https://uss-member-portal-url.jp/search")
+        
+        # Fill search form
+        if make:
+            make_field = self.driver.find_element(By.NAME, "make")
+            make_field.send_keys(make)
+            
+        if model:
+            model_field = self.driver.find_element(By.NAME, "model")
+            model_field.send_keys(model)
+            
+        if year_from:
+            year_field = self.driver.find_element(By.NAME, "year_from")
+            year_field.send_keys(str(year_from))
+        
+        # Submit search
+        search_button = self.driver.find_element(By.ID, "search-button")
+        search_button.click()
+        
+        time.sleep(2)  # Wait for results
+        
+        # Parse results
+        return self.parse_results()
+        
+    def parse_results(self):
+        """Parse vehicle listing results"""
+        vehicles = []
+        
+        # Find all vehicle cards (adjust selectors based on actual USS portal)
+        vehicle_elements = self.driver.find_elements(By.CLASS_NAME, "vehicle-item")
+        
+        for element in vehicle_elements:
+            try:
+                vehicle = {
+                    'lot_number': element.find_element(By.CLASS_NAME, "lot-number").text,
+                    'make': element.find_element(By.CLASS_NAME, "make").text,
+                    'model': element.find_element(By.CLASS_NAME, "model").text,
+                    'year': element.find_element(By.CLASS_NAME, "year").text,
+                    'mileage': element.find_element(By.CLASS_NAME, "mileage").text,
+                    'grade': element.find_element(By.CLASS_NAME, "grade").text,
+                    'start_price': element.find_element(By.CLASS_NAME, "price").text,
+                    'auction_date': element.find_element(By.CLASS_NAME, "auction-date").text,
+                    'image_url': element.find_element(By.TAG_NAME, "img").get_attribute("src")
+                }
+                vehicles.append(vehicle)
+            except Exception as e:
+                print(f"Error parsing vehicle: {e}")
+                continue
+                
+        return vehicles
+        
+    def get_vehicle_details(self, lot_number):
+        """Get detailed info for specific vehicle"""
+        self.driver.get(f"https://uss-member-portal-url.jp/vehicle/{lot_number}")
+        
+        time.sleep(2)
+        
+        details = {
+            'lot_number': lot_number,
+            'chassis_number': self.driver.find_element(By.ID, "chassis").text,
+            'engine_size': self.driver.find_element(By.ID, "engine").text,
+            'transmission': self.driver.find_element(By.ID, "transmission").text,
+            'color': self.driver.find_element(By.ID, "color").text,
+            'equipment': self.driver.find_element(By.ID, "equipment").text,
+            'inspection_details': self.driver.find_element(By.ID, "inspection").text,
+            'photos': [img.get_attribute("src") for img in self.driver.find_elements(By.CLASS_NAME, "vehicle-photo")]
+        }
+        
+        return details
+        
+    def close(self):
+        """Close browser"""
+        self.driver.quit()
+
+# Usage
+scraper = USSAuctionScraper(
+    username="your_uss_member_id",
+    password="your_password"
+)
+
+scraper.login()
+vehicles = scraper.search_vehicles(make="Toyota", model="Land Cruiser", year_from=2015)
+
+# Save to JSON file for your website to use
+with open('auction_data.json', 'w', encoding='utf-8') as f:
+    json.dump(vehicles, f, ensure_ascii=False, indent=2)
+
+scraper.close()
+
+
+-- Create database
+CREATE DATABASE auction_vehicles;
+
+-- Vehicles table
+CREATE TABLE vehicles (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    auction_house VARCHAR(50) NOT NULL, -- 'USS' or 'Arai'
+    lot_number VARCHAR(50) NOT NULL UNIQUE,
+    make VARCHAR(100),
+    model VARCHAR(100),
+    year INT,
+    mileage INT,
+    transmission VARCHAR(50),
+    fuel_type VARCHAR(50),
+    color VARCHAR(50),
+    grade VARCHAR(10),
+    start_price DECIMAL(10, 2),
+    auction_date DATE,
+    auction_location VARCHAR(100),
+    chassis_number VARCHAR(100),
+    engine_size VARCHAR(50),
+    equipment TEXT,
+    inspection_notes TEXT,
+    status VARCHAR(50), -- 'upcoming', 'sold', 'unsold'
+    final_price DECIMAL(10, 2),
+    image_urls JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_auction_date (auction_date),
+    INDEX idx_make_model (make, model),
+    INDEX idx_status (status)
+);
+
+-- Auction schedules
+CREATE TABLE auction_schedules (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    auction_house VARCHAR(50),
+    auction_date DATE,
+    location VARCHAR(100),
+    start_time TIME,
+    total_lots INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Customer alerts
+CREATE TABLE customer_alerts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_email VARCHAR(255),
+    make VARCHAR(100),
+    model VARCHAR(100),
+    year_from INT,
+    year_to INT,
+    price_max DECIMAL(10, 2),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+// server.js
+const express = require('express');
+const mysql = require('mysql2/promise');
+const cors = require('cors');
+const cron = require('node-cron');
+require('dotenv').config();
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// Database connection pool
+const pool = mysql.createPool({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
+});
+
+// API Routes
+
+// Search vehicles
+app.get('/api/vehicles/search', async (req, res) => {
+    try {
+        const { make, model, year_from, year_to, price_max, auction_house, grade } = req.query;
+        
+        let query = 'SELECT * FROM vehicles WHERE status = "upcoming"';
+        const params = [];
+        
+        if (make) {
+            query += ' AND make = ?';
+            params.push(make);
+        }
+        
+        if (model) {
+            query += ' AND model LIKE ?';
+            params.push(`%${model}%`);
+        }
+        
+        if (year_from) {
+            query += ' AND year >= ?';
+            params.push(parseInt(year_from));
+        }
+        
+        if (year_to) {
+            query += ' AND year <= ?';
+            params.push(parseInt(year_to));
+        }
+        
+        if (price_max) {
+            query += ' AND start_price <= ?';
+            params.push(parseFloat(price_max));
+        }
+        
+        if (auction_house) {
+            query += ' AND auction_house = ?';
+            params.push(auction_house);
+        }
+        
+        if (grade) {
+            query += ' AND grade >= ?';
+            params.push(grade);
+        }
+        
+        query += ' ORDER BY auction_date ASC, lot_number ASC LIMIT 100';
+        
+        const [rows] = await pool.query(query, params);
+        
+        res.json({
+            success: true,
+            count: rows.length,
+            vehicles: rows
+        });
+    } catch (error) {
+        console.error('Search error:', error);
+        res.status(500).json({ success: false, error: 'Search failed' });
+    }
+});
+
+// Get vehicle details
+app.get('/api/vehicles/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        const [rows] = await pool.query(
+            'SELECT * FROM vehicles WHERE id = ?',
+            [id]
+        );
+        
+        if (rows.length === 0) {
+            return res.status(404).json({ success: false, error: 'Vehicle not found' });
+        }
+        
+        res.json({
+            success: true,
+            vehicle: rows[0]
+        });
+    } catch (error) {
+        console.error('Details error:', error);
+        res.status(500).json({ success: false, error: 'Failed to fetch details' });
+    }
+});
+
+// Get upcoming auctions
+app.get('/api/auctions/upcoming', async (req, res) => {
+    try {
+        const [rows] = await pool.query(
+            'SELECT * FROM auction_schedules WHERE auction_date >= CURDATE() ORDER BY auction_date ASC',
+            []
+        );
+        
+        res.json({
+            success: true,
+            auctions: rows
+        });
+    } catch (error) {
+        console.error('Auctions error:', error);
+        res.status(500).json({ success: false, error: 'Failed to fetch auctions' });
+    }
+});
+
+// Get statistics
+app.get('/api/stats', async (req, res) => {
+    try {
+        const [totalVehicles] = await pool.query(
+            'SELECT COUNT(*) as count FROM vehicles WHERE status = "upcoming"'
+        );
+        
+        const [makeDistribution] = await pool.query(
+            'SELECT make, COUNT(*) as count FROM vehicles WHERE status = "upcoming" GROUP BY make ORDER BY count DESC LIMIT 10'
+        );
+        
+        const [avgPrices] = await pool.query(
+            'SELECT make, AVG(start_price) as avg_price FROM vehicles WHERE status = "upcoming" GROUP BY make ORDER BY avg_price DESC LIMIT 10'
+        );
+        
+        res.json({
+            success: true,
+            total_vehicles: totalVehicles[0].count,
+            make_distribution: makeDistribution,
+            avg_prices: avgPrices
+        });
+    } catch (error) {
+        console.error('Stats error:', error);
+        res.status(500).json({ success: false, error: 'Failed to fetch stats' });
+    }
+});
+
+// Create customer alert
+app.post('/api/alerts', async (req, res) => {
+    try {
+        const { email, make, model, year_from, year_to, price_max } = req.body;
+        
+        await pool.query(
+            'INSERT INTO customer_alerts (customer_email, make, model, year_from, year_to, price_max) VALUES (?, ?, ?, ?, ?, ?)',
+            [email, make, model, year_from, year_to, price_max]
+        );
+        
+        res.json({ success: true, message: 'Alert created successfully' });
+    } catch (error) {
+        console.error('Alert error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create alert' });
+    }
+});
+
+// Automated data sync (runs every 2 hours)
+cron.schedule('0 */2 * * *', async () => {
+    console.log('Starting automatic auction data sync...');
+    
+    try {
+        // Call your Python scraper or scraping function
+        const { exec } = require('child_process');
+        exec('python3 /path/to/uss_scraper.py', (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Scraper error: ${error}`);
+                return;
+            }
+            console.log(`Scraper output: ${stdout}`);
+            console.log('Auction data sync completed');
+        });
+    } catch (error) {
+        console.error('Sync error:', error);
+    }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+});
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Live USS & Arai Auction Search</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f5f5;
+        }
+        
+        .auction-search-section {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        
+        .search-header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        
+        .search-header h1 {
+            font-size: 2.5rem;
+            color: #0A1628;
+            margin-bottom: 10px;
+        }
+        
+        .live-indicator {
+            display: inline-block;
+            background: #C8102E;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        
+        .search-filters {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+        
+        .filter-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .filter-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+            font-size: 0.9rem;
+        }
+        
+        .filter-group select,
+        .filter-group input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.95rem;
+        }
+        
+        .filter-group select:focus,
+        .filter-group input:focus {
+            outline: none;
+            border-color: #C8102E;
+        }
+        
+        .search-button {
+            width: 100%;
+            padding: 15px;
+            background: #C8102E;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        .search-button:hover {
+            background: #A00D24;
+        }
+        
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .results-count {
+            font-size: 1.2rem;
+            color: #333;
+        }
+        
+        .sort-options select {
+            padding: 8px 15px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .vehicle-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 25px;
+        }
+        
+        .vehicle-card {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            transition: transform 0.3s, box-shadow 0.3s;
+            cursor: pointer;
+        }
+        
+        .vehicle-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 20px rgba(0,0,0,0.15);
+        }
+        
+        .vehicle-image {
+            width: 100%;
+            height: 220px;
+            object-fit: cover;
+            background: #f0f0f0;
+        }
+        
+        .vehicle-info {
+            padding: 20px;
+        }
+        
+        .auction-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            background: #FF6B35;
+            color: white;
+            font-size: 0.75rem;
+            font-weight: bold;
+            border-radius: 3px;
+            margin-bottom: 10px;
+        }
+        
+        .vehicle-title {
+            font-size: 1.3rem;
+            font-weight: bold;
+            color: #0A1628;
+            margin-bottom: 10px;
+        }
+        
+        .vehicle-specs {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+            margin: 15px 0;
+            font-size: 0.9rem;
+            color: #666;
+        }
+        
+        .spec-item {
+            display: flex;
+            align-items: center;
+        }
+        
+        .spec-icon {
+            margin-right: 5px;
+        }
+        
+        .vehicle-grade {
+            display: inline-block;
+            padding: 5px 12px;
+            background: #0A1628;
+            color: white;
+            border-radius: 4px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        
+        .vehicle-price {
+            font-size: 1.8rem;
+            color: #C8102E;
+            font-weight: bold;
+            margin: 15px 0;
+        }
+        
+        .auction-details {
+            font-size: 0.9rem;
+            color: #666;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #eee;
+        }
+        
+        .view-details-btn {
+            width: 100%;
+            padding: 12px;
+            background: #0A1628;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 15px;
+            transition: background 0.3s;
+        }
+        
+        .view-details-btn:hover {
+            background: #1a2740;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            font-size: 1.2rem;
+            color: #666;
+        }
+        
+        .loading::after {
+            content: '...';
+            animation: dots 1.5s steps(4, end) infinite;
+        }
+        
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60%, 100% { content: '...'; }
+        }
+        
+        .no-results {
+            text-align: center;
+            padding: 60px 20px;
+            background: white;
+            border-radius: 8px;
+        }
+        
+        .no-results h3 {
+            font-size: 1.5rem;
+            color: #333;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="auction-search-section">
+        <div class="search-header">
+            <h1>🏁 Live USS & Arai Auction Search</h1>
+            <span class="live-indicator">🔴 LIVE DATA</span>
+            <p style="margin-top: 10px; color: #666;">Updated every 2 hours from USS and Arai auction houses</p>
+        </div>
+        
+        <div class="search-filters">
+            <form id="searchForm">
+                <div class="filter-grid">
+                    <div class="filter-group">
+                        <label>Auction House</label>
+                        <select id="auctionHouse" name="auction_house">
+                            <option value="">All Auctions</option>
+                            <option value="USS">USS</option>
+                            <option value="Arai">Arai</option>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>Make</label>
+                        <select id="make" name="make">
+                            <option value="">All Makes</option>
+                            <option value="Toyota">Toyota</option>
+                            <option value="Honda">Honda</option>
+                            <option value="Nissan">Nissan</option>
+                            <option value="Mazda">Mazda</option>
+                            <option value="Mitsubishi">Mitsubishi</option>
+                            <option value="Subaru">Subaru</option>
+                            <option value="Suzuki">Suzuki</option>
+                            <option value="Daihatsu">Daihatsu</option>
+                            <option value="Lexus">Lexus</option>
+                        </select>
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>Model</label>
+                        <input type="text" id="model" name="model" placeholder="e.g., Land Cruiser">
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>Year From</label>
+                        <input type="number" id="yearFrom" name="year_from" placeholder="2015" min="1980" max="2026">
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>Year To</label>
+                        <input type="number" id="yearTo" name="year_to" placeholder="2024" min="1980" max="2026">
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>Max Price (¥)</label>
+                        <input type="number" id="priceMax" name="price_max" placeholder="3000000" step="100000">
+                    </div>
+                    
+                    <div class="filter-group">
+                        <label>Min Grade</label>
+                        <select id="grade" name="grade">
+                            <option value="">Any Grade</option>
+                            <option value="5">5 (Excellent)</option>
+                            <option value="4.5">4.5 (Very Good)</option>
+                            <option value="4">4 (Good)</option>
+                            <option value="3.5">3.5 (Average)</option>
+                            <option value="3">3 (Fair)</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <button type="submit" class="search-button">🔍 Search Auctions</button>
+            </form>
+        </div>
+        
+        <div id="resultsSection" style="display: none;">
+            <div class="results-header">
+                <div class="results-count" id="resultsCount"></div>
+                <div class="sort-options">
+                    <select id="sortBy" onchange="sortResults(this.value)">
+                        <option value="date">Sort by Auction Date</option>
+                        <option value="price_asc">Price: Low to High</option>
+                        <option value="price_desc">Price: High to Low</option>
+                        <option value="year_desc">Year: Newest First</option>
+                        <option value="mileage_asc">Mileage: Low to High</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div id="results"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:3000/api'; // Change to your server URL
+        let currentVehicles = [];
+        
+        document.getElementById('searchForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await searchVehicles();
+        });
+        
+        async function searchVehicles() {
+            const formData = new FormData(document.getElementById('searchForm'));
+            const params = new URLSearchParams();
+            
+            for (let [key, value] of formData.entries()) {
+                if (value) params.append(key, value);
+            }
+            
+            showLoading();
+            
+            try {
+                const response = await fetch(`${API_URL}/vehicles/search?${params}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentVehicles = data.vehicles;
+                    displayResults(currentVehicles);
+                    document.getElementById('resultsSection').style.display = 'block';
+                } else {
+                    showError('Failed to fetch vehicles');
+                }
+            } catch (error) {
+                console.error('Search error:', error);
+                showError('Connection error. Please try again.');
+            }
+        }
+        
+        function showLoading() {
+            document.getElementById('results').innerHTML = '<div class="loading">Searching auctions</div>';
+            document.getElementById('resultsSection').style.display = 'block';
+        }
+        
+        function showError(message) {
+            document.getElementById('results').innerHTML = `<div class="no-results"><h3>${message}</h3></div>`;
+        }
+        
+        function displayResults(vehicles) {
+            const resultsDiv = document.getElementById('results');
+            const countDiv = document.getElementById('resultsCount');
+            
+            if (vehicles.length === 0) {
+                resultsDiv.innerHTML = '<div class="no-results"><h3>No vehicles found</h3><p>Try adjusting your search filters</p></div>';
+                countDiv.textContent = '0 vehicles found';
+                return;
+            }
+            
+            countDiv.textContent = `${vehicles.length} vehicle${vehicles.length > 1 ? 's' : ''} found`;
+            
+            const html = vehicles.map(v => {
+                const images = JSON.parse(v.image_urls || '[]');
+                const mainImage = images[0] || 'placeholder.jpg';
+                
+                return `
+                    <div class="vehicle-card" onclick="viewVehicleDetails(${v.id})">
+                        <img src="${mainImage}" alt="${v.make} ${v.model}" class="vehicle-image">
+                        <div class="vehicle-info">
+                            <div class="auction-badge">${v.auction_house} - Lot #${v.lot_number}</div>
+                            <div class="vehicle-title">${v.year} ${v.make} ${v.model}</div>
+                            
+                            <div class="vehicle-specs">
+                                <div class="spec-item">
+                                    <span class="spec-icon">📏</span>
+                                    ${(v.mileage || 0).toLocaleString()} km
+                                </div>
+                                <div class="spec-item">
+                                    <span class="spec-icon">⚙️</span>
+                                    ${v.transmission || 'N/A'}
+                                </div>
+                                <div class="spec-item">
+                                    <span class="spec-icon">⛽</span>
+                                    ${v.fuel_type || 'N/A'}
+                                </div>
+                                <div class="spec-item">
+                                    <span class="spec-icon">🎨</span>
+                                    ${v.color || 'N/A'}
+                                </div>
+                            </div>
+                            
+                            <div class="vehicle-grade">Grade: ${v.grade || 'N/A'}</div>
+                            
+                            <div class="vehicle-price">¥${(v.start_price || 0).toLocaleString()}</div>
+                            
+                            <div class="auction-details">
+                                📅 ${formatDate(v.auction_date)}<br>
+                                📍 ${v.auction_location || 'Japan'}
+                            </div>
+                            
+                            <button class="view-details-btn">View Full Details & Auction Sheet</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            resultsDiv.innerHTML = `<div class="vehicle-grid">${html}</div>`;
+        }
+        
+        function sortResults(sortBy) {
+            let sorted = [...currentVehicles];
+            
+            switch(sortBy) {
+                case 'price_asc':
+                    sorted.sort((a, b) => (a.start_price || 0) - (b.start_price || 0));
+                    break;
+                case 'price_desc':
+                    sorted.sort((a, b) => (b.start_price || 0) - (a.start_price || 0));
+                    break;
+                case 'year_desc':
+                    sorted.sort((a, b) => (b.year || 0) - (a.year || 0));
+                    break;
+                case 'mileage_asc':
+                    sorted.sort((a, b) => (a.mileage || 0) - (b.mileage || 0));
+                    break;
+                default: // date
+                    sorted.sort((a, b) => new Date(a.auction_date) - new Date(b.auction_date));
+            }
+            
+            displayResults(sorted);
+        }
+        
+        async function viewVehicleDetails(vehicleId) {
+            try {
+                const response = await fetch(`${API_URL}/vehicles/${vehicleId}`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Open in modal or new page
+                    window.location.href = `vehicle-details.html?id=${vehicleId}`;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to load vehicle details');
+            }
+        }
+        
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleDateString('en-US', { 
+                year: 'numeric', 
+                month: 'short', 
+                day: 'numeric' 
+            });
+        }
+        
+        // Load initial data on page load
+        window.addEventListener('load', () => {
+            searchVehicles();
+        });
+    </script>
+</body>
+</html>
+
+
+
+# On Ubuntu server
+sudo apt update
+sudo apt install nodejs npm nginx mysql-server python3 python3-pip
+
+# Install Python dependencies
+pip3 install selenium beautifulsoup4 mysql-connector-python
+
+# Install Chrome/Chromium for Selenium
+sudo apt install chromium-browser chromium-chromedriver
+
+# Setup MySQL database
+mysql -u root -p
+CREATE DATABASE auction_vehicles;
+CREATE USER 'auction_user'@'localhost' IDENTIFIED BY 'strong_password';
+GRANT ALL PRIVILEGES ON auction_vehicles.* TO 'auction_user'@'localhost';
+FLUSH PRIVILEGES;
+
+# Clone your code
+git clone your-repo.git
+cd your-repo
+npm install
+
+# Setup environment variables
+nano .env
+# Add:
+# DB_HOST=localhost
+# DB_USER=auction_user
+# DB_PASSWORD=strong_password
+# DB_NAME=auction_vehicles
+# PORT=3000
+
+# Start with PM2 (keeps running)
+npm install -g pm2
+pm2 start server.js
+pm2 startup
+pm2 save
+
+# Configure Nginx as reverse proxy
+sudo nano /etc/nginx/sites-available/auction-api
+# Configure to proxy to localhost:3000
+
+sudo ln -s /etc/nginx/sites-available/auction-api /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
+
+
+
